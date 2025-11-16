@@ -10,6 +10,10 @@ import FarmNew from "./pages/FarmNew";
 import FarmDetail from "./pages/FarmDetail";
 import Maps from "./pages/Maps";
 import AIRecommendations from "./pages/AIRecommendations";
+import IoTDevices from "./pages/IoTDevices";
+import Reports from "./pages/Reports";
+import Community from "./pages/Community";
+import Support from "./pages/Support";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -21,6 +25,10 @@ function Router() {
       <Route path={"/farms/:id"} component={FarmDetail} />
       <Route path={"/maps"} component={Maps} />
       <Route path={"/ai-recommendations"} component={AIRecommendations} />
+      <Route path={"/iot-devices"} component={IoTDevices} />
+      <Route path={"/reports"} component={Reports} />
+      <Route path={"/community"} component={Community} />
+      <Route path={"/support"} component={Support} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
