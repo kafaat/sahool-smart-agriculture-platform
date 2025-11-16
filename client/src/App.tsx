@@ -14,6 +14,9 @@ import IoTDevices from "./pages/IoTDevices";
 import Reports from "./pages/Reports";
 import Community from "./pages/Community";
 import Support from "./pages/Support";
+import AdminUsers from "./pages/AdminUsers";
+import CRM from "./pages/CRM";
+import ERP from "./pages/ERP";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -29,6 +32,9 @@ function Router() {
       <Route path={"/reports"} component={Reports} />
       <Route path={"/community"} component={Community} />
       <Route path={"/support"} component={Support} />
+      <Route path={"/admin/users"} component={AdminUsers} />
+      <Route path={"/crm"} component={CRM} />
+      <Route path={"/erp"} component={ERP} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
