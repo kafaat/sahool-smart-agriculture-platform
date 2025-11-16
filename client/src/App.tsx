@@ -17,6 +17,10 @@ import Support from "./pages/Support";
 import AdminUsers from "./pages/AdminUsers";
 import CRM from "./pages/CRM";
 import ERP from "./pages/ERP";
+import Settings from "./pages/Settings";
+import Notifications from "./pages/Notifications";
+import Integrations from "./pages/Integrations";
+import APIKeys from "./pages/APIKeys";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -35,6 +39,10 @@ function Router() {
       <Route path={"/admin/users"} component={AdminUsers} />
       <Route path={"/crm"} component={CRM} />
       <Route path={"/erp"} component={ERP} />
+      <Route path={"/settings"} component={Settings} />
+      <Route path={"/notifications"} component={Notifications} />
+      <Route path={"/integrations"} component={Integrations} />
+      <Route path={"/api-keys"} component={APIKeys} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
