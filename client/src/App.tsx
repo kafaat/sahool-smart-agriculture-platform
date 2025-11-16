@@ -6,6 +6,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
+import FarmNew from "./pages/FarmNew";
+import FarmDetail from "./pages/FarmDetail";
+import Maps from "./pages/Maps";
+import AIRecommendations from "./pages/AIRecommendations";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -13,6 +17,10 @@ function Router() {
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/dashboard"} component={Dashboard} />
+      <Route path={"/farms/new"} component={FarmNew} />
+      <Route path={"/farms/:id"} component={FarmDetail} />
+      <Route path={"/maps"} component={Maps} />
+      <Route path={"/ai-recommendations"} component={AIRecommendations} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
