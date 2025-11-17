@@ -3,10 +3,21 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+
+// Middleware to inject a dummy user for dev
+function noAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  req.user = {
+    openId: "dev-user",
+    name: "Dev User",
+    email: "dev@example.com",
+    loginMethod: "none",
+    lastSignedIn: new Date(),
+  };
+  next();
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -30,11 +41,14 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  // OAuth callback under /api/oauth/callback
-  registerOAuthRoutes(app);
+
+  // Inject no-auth dummy user
+  app.use(noAuthMiddleware);
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -43,7 +57,8 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
+
+  // Development mode uses Vite, production mode serves static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {

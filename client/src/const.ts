@@ -6,10 +6,20 @@ export const APP_LOGO = "https://placehold.co/128x128/E1E7EF/1F2937?text=App";
 
 // Generate login URL at runtime so redirect URI reflects the current origin.
 export const getLoginUrl = () => {
+  // If no-auth mode is enabled, just return home
+  if (import.meta.env.VITE_NO_AUTH === "true") {
+    return "/";
+  }
+
   const oauthPortalUrl = import.meta.env.VITE_OAUTH_PORTAL_URL;
   const appId = import.meta.env.VITE_APP_ID;
   const redirectUri = `${window.location.origin}/api/oauth/callback`;
   const state = btoa(redirectUri);
+
+  if (!oauthPortalUrl) {
+    console.warn("[getLoginUrl] VITE_OAUTH_PORTAL_URL is not set, returning '/'");
+    return "/";
+  }
 
   const url = new URL(`${oauthPortalUrl}/app-auth`);
   url.searchParams.set("appId", appId);
