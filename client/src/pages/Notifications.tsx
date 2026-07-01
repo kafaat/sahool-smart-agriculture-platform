@@ -1,4 +1,3 @@
-import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,55 +5,56 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Bell, Check, CheckCheck, Droplets, Cloud, Bug, Wrench, FileText, AlertTriangle, Info, X } from "lucide-react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
+
+function formatRelativeTime(date: Date | string): string {
+  const then = new Date(date).getTime();
+  const now = Date.now();
+  const diffSec = Math.max(0, Math.floor((now - then) / 1000));
+
+  if (diffSec < 60) return "الآن";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `منذ ${diffMin} دقيقة`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `منذ ${diffHour} ساعة`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `منذ ${diffDay} يوم`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `منذ ${diffMonth} شهر`;
+  const diffYear = Math.floor(diffMonth / 12);
+  return `منذ ${diffYear} سنة`;
+}
+
+function isToday(date: Date | string): boolean {
+  const d = new Date(date);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
 
 export default function Notifications() {
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      type: "irrigation",
-      title: "تنبيه ري - حقل القمح الشمالي",
-      message: "مستوى رطوبة التربة منخفض (25%). يُنصح بالري خلال 6 ساعات.",
-      timestamp: "منذ 10 دقائق",
-      read: false,
-      priority: "high",
-    },
-    {
-      id: 2,
-      type: "weather",
-      title: "تحذير طقس - أمطار غزيرة متوقعة",
-      message: "أمطار غزيرة متوقعة خلال 24 ساعة. تأكد من تصريف المياه.",
-      timestamp: "منذ ساعة",
-      read: false,
-      priority: "high",
-    },
-    {
-      id: 3,
-      type: "disease",
-      title: "كشف مرض محتمل - حقل الطماطم",
-      message: "تم اكتشاف أعراض مشابهة للعفن على أوراق الطماطم. فحص موصى به.",
-      timestamp: "منذ 3 ساعات",
-      read: true,
-      priority: "medium",
-    },
-    {
-      id: 4,
-      type: "equipment",
-      title: "صيانة معدات - مضخة الري رقم 3",
-      message: "موعد الصيانة الدورية للمضخة رقم 3 بعد أسبوع.",
-      timestamp: "منذ يوم",
-      read: true,
-      priority: "low",
-    },
-    {
-      id: 5,
-      type: "report",
-      title: "تقرير أسبوعي جاهز",
-      message: "تقرير استهلاك المياه والطاقة الأسبوعي جاهز للمراجعة.",
-      timestamp: "منذ يومين",
-      read: true,
-      priority: "low",
-    },
-  ]);
+  const { data, refetch } = trpc.notification.list.useQuery();
+  const notifications = data ?? [];
+
+  const markAsReadMutation = trpc.notification.markAsRead.useMutation({
+    onSuccess: () => refetch(),
+    onError: (e) => toast.error(e.message),
+  });
+  const markAllAsReadMutation = trpc.notification.markAllAsRead.useMutation({
+    onSuccess: () => refetch(),
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteMutation = trpc.notification.delete.useMutation({
+    onSuccess: () => refetch(),
+    onError: (e) => toast.error(e.message),
+  });
+  const clearAllMutation = trpc.notification.clearAll.useMutation({
+    onSuccess: () => refetch(),
+    onError: (e) => toast.error(e.message),
+  });
 
   const typeIcons: Record<string, React.ReactNode> = {
     irrigation: <Droplets className="w-4 h-4" />,
@@ -92,27 +92,25 @@ export default function Notifications() {
     low: "secondary",
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   const handleMarkAsRead = (id: number) => {
-    setNotifications(
-      notifications.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+    markAsReadMutation.mutate({ id });
     toast.success("تم تحديد الإشعار كمقروء");
   };
 
   const handleMarkAllAsRead = () => {
-    setNotifications(notifications.map((n) => ({ ...n, read: true })));
+    markAllAsReadMutation.mutate();
     toast.success("تم تحديد جميع الإشعارات كمقروءة");
   };
 
   const handleDelete = (id: number) => {
-    setNotifications(notifications.filter((n) => n.id !== id));
+    deleteMutation.mutate({ id });
     toast.success("تم حذف الإشعار");
   };
 
   const handleClearAll = () => {
-    setNotifications([]);
+    clearAllMutation.mutate();
     toast.success("تم حذف جميع الإشعارات");
   };
 
@@ -196,7 +194,7 @@ export default function Notifications() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-purple-900">
-                {notifications.filter((n) => n.timestamp.includes("دقائق") || n.timestamp.includes("ساعة")).length}
+                {notifications.filter((n) => isToday(n.createdAt)).length}
               </div>
             </CardContent>
           </Card>
@@ -238,7 +236,7 @@ export default function Notifications() {
                 filterByType(tabValue).map((notification) => (
                   <Card
                     key={notification.id}
-                    className={!notification.read ? "border-l-4 border-l-green-600" : ""}
+                    className={!notification.isRead ? "border-l-4 border-l-green-600" : ""}
                   >
                     <CardContent className="p-4">
                       <div className="flex items-start gap-4">
@@ -256,7 +254,7 @@ export default function Notifications() {
                                 <h3 className="font-semibold text-green-900">
                                   {notification.title}
                                 </h3>
-                                {!notification.read && (
+                                {!notification.isRead && (
                                   <Badge variant="default" className="text-xs">
                                     جديد
                                   </Badge>
@@ -270,7 +268,7 @@ export default function Notifications() {
                               <Badge variant={priorityColors[notification.priority]}>
                                 {priorityLabels[notification.priority]}
                               </Badge>
-                              {!notification.read && (
+                              {!notification.isRead && (
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -298,7 +296,7 @@ export default function Notifications() {
                                 {typeLabels[notification.type]}
                               </div>
                             </span>
-                            <span>{notification.timestamp}</span>
+                            <span>{formatRelativeTime(notification.createdAt)}</span>
                           </div>
                         </div>
                       </div>

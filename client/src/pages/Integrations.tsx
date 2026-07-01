@@ -1,6 +1,6 @@
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -10,79 +10,94 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Satellite, Cloud, MessageSquare, Database, Zap, CheckCircle2, XCircle, Settings } from "lucide-react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
 
-interface Integration {
-  id: string;
+type IntegrationCategory = "gis" | "weather" | "communication" | "data" | "automation";
+type IntegrationStatus = "connected" | "disconnected" | "error";
+
+// Hardcoded catalog of AVAILABLE integrations. Icons live here only (never in the DB).
+interface CatalogIntegration {
+  slug: string;
   name: string;
   description: string;
   icon: React.ReactNode;
-  category: string;
-  enabled: boolean;
-  status: "connected" | "disconnected" | "error";
+  category: IntegrationCategory;
   apiKeyRequired: boolean;
   features: string[];
 }
 
-export default function Integrations() {
-  const [integrations, setIntegrations] = useState<Integration[]>([
-    {
-      id: "sentinel-hub",
-      name: "Sentinel Hub",
-      description: "صور الأقمار الصناعية وتحليل NDVI للحقول",
-      icon: <Satellite className="w-6 h-6" />,
-      category: "gis",
-      enabled: true,
-      status: "connected",
-      apiKeyRequired: true,
-      features: ["صور NDVI", "تحليل صحة النباتات", "خرائط حرارية", "تاريخ التغطية"],
-    },
-    {
-      id: "openweathermap",
-      name: "OpenWeatherMap",
-      description: "بيانات الطقس الحالية والتنبؤات المستقبلية",
-      icon: <Cloud className="w-6 h-6" />,
-      category: "weather",
-      enabled: true,
-      status: "connected",
-      apiKeyRequired: true,
-      features: ["الطقس الحالي", "توقعات 7 أيام", "تنبيهات الطقس", "بيانات تاريخية"],
-    },
-    {
-      id: "twilio",
-      name: "Twilio",
-      description: "إرسال الرسائل النصية والإشعارات عبر SMS",
-      icon: <MessageSquare className="w-6 h-6" />,
-      category: "communication",
-      enabled: false,
-      status: "disconnected",
-      apiKeyRequired: true,
-      features: ["رسائل SMS", "رسائل WhatsApp", "مكالمات صوتية", "تأكيد ثنائي"],
-    },
-    {
-      id: "soil-database",
-      name: "قاعدة بيانات التربة العالمية",
-      description: "معلومات تفصيلية عن أنواع التربة والخصائص",
-      icon: <Database className="w-6 h-6" />,
-      category: "data",
-      enabled: true,
-      status: "connected",
-      apiKeyRequired: false,
-      features: ["تحليل التربة", "توصيات الأسمدة", "خرائط التربة", "بيانات pH"],
-    },
-    {
-      id: "zapier",
-      name: "Zapier",
-      description: "أتمتة العمليات والتكامل مع 5000+ تطبيق",
-      icon: <Zap className="w-6 h-6" />,
-      category: "automation",
-      enabled: false,
-      status: "disconnected",
-      apiKeyRequired: true,
-      features: ["أتمتة المهام", "تكامل التطبيقات", "سير العمل", "الإشعارات"],
-    },
-  ]);
+// Merged view of a catalog item with the current user's saved state (if any).
+interface MergedIntegration extends CatalogIntegration {
+  id?: number;
+  enabled: boolean;
+  status: IntegrationStatus;
+  hasApiKey: boolean;
+}
 
-  const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
+const catalog: CatalogIntegration[] = [
+  {
+    slug: "sentinel-hub",
+    name: "Sentinel Hub",
+    description: "صور الأقمار الصناعية وتحليل NDVI للحقول",
+    icon: <Satellite className="w-6 h-6" />,
+    category: "gis",
+    apiKeyRequired: true,
+    features: ["صور NDVI", "تحليل صحة النباتات", "خرائط حرارية", "تاريخ التغطية"],
+  },
+  {
+    slug: "openweathermap",
+    name: "OpenWeatherMap",
+    description: "بيانات الطقس الحالية والتنبؤات المستقبلية",
+    icon: <Cloud className="w-6 h-6" />,
+    category: "weather",
+    apiKeyRequired: true,
+    features: ["الطقس الحالي", "توقعات 7 أيام", "تنبيهات الطقس", "بيانات تاريخية"],
+  },
+  {
+    slug: "twilio",
+    name: "Twilio",
+    description: "إرسال الرسائل النصية والإشعارات عبر SMS",
+    icon: <MessageSquare className="w-6 h-6" />,
+    category: "communication",
+    apiKeyRequired: true,
+    features: ["رسائل SMS", "رسائل WhatsApp", "مكالمات صوتية", "تأكيد ثنائي"],
+  },
+  {
+    slug: "soil-database",
+    name: "قاعدة بيانات التربة العالمية",
+    description: "معلومات تفصيلية عن أنواع التربة والخصائص",
+    icon: <Database className="w-6 h-6" />,
+    category: "data",
+    apiKeyRequired: false,
+    features: ["تحليل التربة", "توصيات الأسمدة", "خرائط التربة", "بيانات pH"],
+  },
+  {
+    slug: "zapier",
+    name: "Zapier",
+    description: "أتمتة العمليات والتكامل مع 5000+ تطبيق",
+    icon: <Zap className="w-6 h-6" />,
+    category: "automation",
+    apiKeyRequired: true,
+    features: ["أتمتة المهام", "تكامل التطبيقات", "سير العمل", "الإشعارات"],
+  },
+];
+
+export default function Integrations() {
+  const { data: saved, refetch } = trpc.integration.list.useQuery();
+
+  const upsert = trpc.integration.upsert.useMutation({
+    onError: (e) => toast.error(e.message),
+  });
+  const toggle = trpc.integration.toggle.useMutation({
+    onSuccess: () => refetch(),
+    onError: (e) => toast.error(e.message),
+  });
+  const configure = trpc.integration.configure.useMutation({
+    onSuccess: () => refetch(),
+    onError: (e) => toast.error(e.message),
+  });
+
+  const [selectedIntegration, setSelectedIntegration] = useState<MergedIntegration | null>(null);
   const [apiKey, setApiKey] = useState("");
 
   const categoryLabels: Record<string, string> = {
@@ -93,41 +108,73 @@ export default function Integrations() {
     automation: "الأتمتة",
   };
 
-  const handleToggleIntegration = (id: string) => {
-    setIntegrations(
-      integrations.map((integration) =>
-        integration.id === id
-          ? { ...integration, enabled: !integration.enabled }
-          : integration
-      )
-    );
-    const integration = integrations.find((i) => i.id === id);
-    if (integration) {
-      toast.success(
-        integration.enabled
-          ? `تم تعطيل ${integration.name}`
-          : `تم تفعيل ${integration.name}`
-      );
+  // Index saved rows by slug for O(1) merge lookups.
+  const savedBySlug = new Map((saved ?? []).map((row) => [row.slug, row]));
+
+  // Merge the hardcoded catalog with the user's saved state (keyed by slug).
+  const merged: MergedIntegration[] = catalog.map((item) => {
+    const row = savedBySlug.get(item.slug);
+    return {
+      ...item,
+      id: row?.id,
+      enabled: row?.enabled ?? false,
+      status: (row?.status as IntegrationStatus) ?? "disconnected",
+      hasApiKey: row?.hasApiKey ?? false,
+    };
+  });
+
+  // Ensure a saved DB row exists for a catalog item; returns its numeric id.
+  const ensureSavedRow = async (item: CatalogIntegration): Promise<number> => {
+    const existing = savedBySlug.get(item.slug);
+    if (existing) return existing.id;
+    await upsert.mutateAsync({
+      slug: item.slug,
+      name: item.name,
+      description: item.description,
+      category: item.category,
+      apiKeyRequired: item.apiKeyRequired,
+      features: item.features,
+    });
+    const res = await refetch();
+    const created = (res.data ?? []).find((r) => r.slug === item.slug);
+    if (!created) throw new Error("تعذّر إنشاء التكامل");
+    return created.id;
+  };
+
+  const handleToggleIntegration = async (item: MergedIntegration) => {
+    try {
+      if (item.id != null) {
+        await toggle.mutateAsync({ id: item.id, enabled: !item.enabled });
+        toast.success(item.enabled ? `تم تعطيل ${item.name}` : `تم تفعيل ${item.name}`);
+      } else {
+        const id = await ensureSavedRow(item);
+        await toggle.mutateAsync({ id, enabled: true });
+        toast.success(`تم تفعيل ${item.name}`);
+      }
+    } catch {
+      // errors surfaced via mutation onError toasts
     }
   };
 
-  const handleConfigureIntegration = (integration: Integration) => {
-    setSelectedIntegration(integration);
+  const handleConfigureIntegration = (item: MergedIntegration) => {
+    setSelectedIntegration(item);
     setApiKey("");
   };
 
-  const handleSaveConfiguration = () => {
-    if (selectedIntegration && apiKey) {
-      setIntegrations(
-        integrations.map((integration) =>
-          integration.id === selectedIntegration.id
-            ? { ...integration, status: "connected", enabled: true }
-            : integration
-        )
-      );
+  const handleSaveConfiguration = async () => {
+    if (!selectedIntegration) return;
+    if (selectedIntegration.apiKeyRequired && !apiKey) {
+      toast.error("مفتاح API مطلوب");
+      return;
+    }
+    try {
+      const id = await ensureSavedRow(selectedIntegration);
+      await configure.mutateAsync({ id, apiKey: apiKey || undefined });
       toast.success(`تم حفظ إعدادات ${selectedIntegration.name}`);
       setSelectedIntegration(null);
       setApiKey("");
+    } catch {
+      // errors surfaced via mutation onError toasts
     }
   };
 
@@ -135,8 +182,8 @@ export default function Integrations() {
     toast.success("تم اختبار الاتصال بنجاح!");
   };
 
-  const enabledCount = integrations.filter((i) => i.enabled).length;
-  const connectedCount = integrations.filter((i) => i.status === "connected").length;
+  const enabledCount = merged.filter((i) => i.enabled).length;
+  const connectedCount = merged.filter((i) => i.status === "connected").length;
 
   return (
     <DashboardLayout>
@@ -157,7 +204,7 @@ export default function Integrations() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-900">{integrations.length}</div>
+              <div className="text-2xl font-bold text-green-900">{merged.length}</div>
             </CardContent>
           </Card>
 
@@ -191,7 +238,7 @@ export default function Integrations() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-amber-900">
-                {integrations.length - connectedCount}
+                {merged.length - connectedCount}
               </div>
             </CardContent>
           </Card>
@@ -211,10 +258,10 @@ export default function Integrations() {
           {["all", "gis", "weather", "communication", "data", "automation"].map((category) => (
             <TabsContent key={category} value={category} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {integrations
+                {merged
                   .filter((i) => category === "all" || i.category === category)
                   .map((integration) => (
-                    <Card key={integration.id}>
+                    <Card key={integration.slug}>
                       <CardHeader>
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-3">
@@ -258,7 +305,7 @@ export default function Integrations() {
                             <Switch
                               checked={integration.enabled}
                               onCheckedChange={() =>
-                                handleToggleIntegration(integration.id)
+                                handleToggleIntegration(integration)
                               }
                             />
                             <Label className="text-sm">
@@ -323,7 +370,11 @@ export default function Integrations() {
                                 <Button
                                   onClick={handleSaveConfiguration}
                                   className="flex-1 bg-green-700 hover:bg-green-800"
-                                  disabled={integration.apiKeyRequired && !apiKey}
+                                  disabled={
+                                    (integration.apiKeyRequired && !apiKey) ||
+                                    configure.isPending ||
+                                    upsert.isPending
+                                  }
                                 >
                                   حفظ
                                 </Button>

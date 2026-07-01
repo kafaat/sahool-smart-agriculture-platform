@@ -3,77 +3,39 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Users, UserPlus, Search, MoreVertical, Shield, Ban, CheckCircle } from "lucide-react";
+import { UserPlus, Search, Ban, CheckCircle, Info } from "lucide-react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
+
+const ROLE_VALUES = ["user", "admin", "farmer_small", "farmer_medium", "enterprise", "government"] as const;
+type RoleValue = (typeof ROLE_VALUES)[number];
 
 export default function AdminUsers() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterRole, setFilterRole] = useState<string>("all");
 
-  // Mock data
-  const users = [
-    {
-      id: 1,
-      name: "أحمد محمد علي",
-      email: "ahmed@example.com",
-      phone: "+967 777 123 456",
-      role: "farmer_small",
-      status: "active",
-      farmsCount: 2,
-      lastLogin: "منذ ساعتين",
-      createdAt: "2024-01-15",
+  const { data, refetch } = trpc.admin.listUsers.useQuery();
+  const users = data ?? [];
+
+  const updateStatus = trpc.admin.updateUserStatus.useMutation({
+    onSuccess: () => {
+      refetch();
     },
-    {
-      id: 2,
-      name: "فاطمة حسن",
-      email: "fatima@example.com",
-      phone: "+967 777 234 567",
-      role: "farmer_medium",
-      status: "active",
-      farmsCount: 5,
-      lastLogin: "منذ يوم",
-      createdAt: "2024-01-10",
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateRole = trpc.admin.updateUserRole.useMutation({
+    onSuccess: () => {
+      toast.success("تم تحديث صلاحية المستخدم");
+      refetch();
     },
-    {
-      id: 3,
-      name: "شركة الزراعة الحديثة",
-      email: "modern@agri.com",
-      phone: "+967 777 345 678",
-      role: "enterprise",
-      status: "active",
-      farmsCount: 25,
-      lastLogin: "منذ 3 ساعات",
-      createdAt: "2023-12-01",
-    },
-    {
-      id: 4,
-      name: "وزارة الزراعة - صنعاء",
-      email: "gov@agriculture.gov.ye",
-      phone: "+967 777 456 789",
-      role: "government",
-      status: "active",
-      farmsCount: 0,
-      lastLogin: "منذ أسبوع",
-      createdAt: "2023-11-15",
-    },
-    {
-      id: 5,
-      name: "خالد عبدالله",
-      email: "khaled@example.com",
-      phone: "+967 777 567 890",
-      role: "farmer_small",
-      status: "suspended",
-      farmsCount: 1,
-      lastLogin: "منذ شهر",
-      createdAt: "2024-01-05",
-    },
-  ];
+    onError: (e) => toast.error(e.message),
+  });
 
   const roleLabels: Record<string, string> = {
     user: "مستخدم عادي",
@@ -96,25 +58,39 @@ export default function AdminUsers() {
     pending: "secondary",
   };
 
+  const formatDate = (value: string | Date | null | undefined) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("ar", { year: "numeric", month: "short", day: "numeric" });
+  };
+
   const filteredUsers = users.filter((user) => {
+    const name = user.name ?? "";
+    const email = user.email ?? "";
     const matchesSearch =
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase());
+      name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = filterRole === "all" || user.role === filterRole;
     return matchesSearch && matchesRole;
   });
 
-  const handleAddUser = () => {
-    toast.success("تم إضافة المستخدم بنجاح");
-    setIsAddDialogOpen(false);
-  };
-
   const handleSuspendUser = (userId: number) => {
-    toast.success("تم إيقاف المستخدم");
+    updateStatus.mutate(
+      { id: userId, status: "suspended" },
+      { onSuccess: () => toast.success("تم إيقاف المستخدم") }
+    );
   };
 
   const handleActivateUser = (userId: number) => {
-    toast.success("تم تفعيل المستخدم");
+    updateStatus.mutate(
+      { id: userId, status: "active" },
+      { onSuccess: () => toast.success("تم تفعيل المستخدم") }
+    );
+  };
+
+  const handleRoleChange = (userId: number, role: string) => {
+    updateRole.mutate({ id: userId, role: role as RoleValue });
   };
 
   return (
@@ -138,43 +114,16 @@ export default function AdminUsers() {
               <DialogHeader>
                 <DialogTitle>إضافة مستخدم جديد</DialogTitle>
                 <DialogDescription>
-                  أدخل معلومات المستخدم الجديد
+                  طريقة تسجيل المستخدمين
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">الاسم الكامل *</Label>
-                  <Input id="name" placeholder="أحمد محمد" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">البريد الإلكتروني *</Label>
-                  <Input id="email" type="email" placeholder="ahmed@example.com" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">رقم الهاتف</Label>
-                  <Input id="phone" placeholder="+967 777 123 456" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="role">نوع المستخدم *</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="اختر النوع" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="farmer_small">مزارع صغير</SelectItem>
-                      <SelectItem value="farmer_medium">مزارع متوسط</SelectItem>
-                      <SelectItem value="enterprise">شركة زراعية</SelectItem>
-                      <SelectItem value="government">جهة حكومية</SelectItem>
-                      <SelectItem value="admin">مدير النظام</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  onClick={handleAddUser}
-                  className="w-full bg-green-700 hover:bg-green-800"
-                >
-                  إضافة المستخدم
-                </Button>
+              <div className="flex items-start gap-3 rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                <Info className="w-5 h-5 shrink-0 text-green-700" />
+                <p>
+                  لا يمكن إضافة المستخدمين يدوياً. يقوم المستخدمون بالتسجيل الذاتي عبر
+                  تسجيل الدخول باستخدام حساباتهم. بعد التسجيل يمكنك إدارة صلاحياتهم
+                  وحالتهم من هذه الصفحة.
+                </p>
               </div>
             </DialogContent>
           </Dialog>
@@ -216,7 +165,7 @@ export default function AdminUsers() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-blue-900">
-                {users.filter((u) => u.role.includes("farmer")).length}
+                {users.filter((u) => u.role.startsWith("farmer")).length}
               </div>
               <p className="text-xs text-muted-foreground">مزارع</p>
             </CardContent>
@@ -281,7 +230,7 @@ export default function AdminUsers() {
                 <TableRow>
                   <TableHead>المستخدم</TableHead>
                   <TableHead>النوع</TableHead>
-                  <TableHead>المزارع</TableHead>
+                  <TableHead>الصلاحية</TableHead>
                   <TableHead>الحالة</TableHead>
                   <TableHead>آخر دخول</TableHead>
                   <TableHead>الإجراءات</TableHead>
@@ -292,22 +241,38 @@ export default function AdminUsers() {
                   <TableRow key={user.id}>
                     <TableCell>
                       <div>
-                        <div className="font-medium">{user.name}</div>
+                        <div className="font-medium">{user.name ?? user.email ?? "—"}</div>
                         <div className="text-xs text-muted-foreground">{user.email}</div>
-                        <div className="text-xs text-muted-foreground">{user.phone}</div>
+                        <div className="text-xs text-muted-foreground">{user.phone ?? "—"}</div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{roleLabels[user.role]}</Badge>
+                      <Badge variant="outline">{roleLabels[user.role] ?? user.role}</Badge>
                     </TableCell>
-                    <TableCell>{user.farmsCount}</TableCell>
+                    <TableCell>
+                      <Select
+                        value={user.role}
+                        onValueChange={(value) => handleRoleChange(user.id, value)}
+                      >
+                        <SelectTrigger className="w-40">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ROLE_VALUES.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {roleLabels[role]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={statusColors[user.status]}>
-                        {statusLabels[user.status]}
+                        {statusLabels[user.status] ?? user.status}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {user.lastLogin}
+                      {formatDate(user.lastSignedIn)}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
@@ -330,10 +295,6 @@ export default function AdminUsers() {
                             تفعيل
                           </Button>
                         )}
-                        <Button size="sm" variant="outline">
-                          <Shield className="w-3 h-3 mr-1" />
-                          الصلاحيات
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

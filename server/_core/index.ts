@@ -7,6 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { rateLimit, securityHeaders } from "./security";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -30,11 +31,18 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Express sits behind the platform proxy; trust it so client IPs (used by the
+  // rate limiter) and secure-protocol detection work correctly.
+  app.set("trust proxy", 1);
+  // Baseline security headers on every response.
+  app.use(securityHeaders());
+  // Configure body parser with a sane limit (was 50mb — a DoS risk).
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ limit: "2mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+  // Rate limit the API surface: 300 requests/minute/IP.
+  app.use("/api", rateLimit({ windowMs: 60_000, max: 300 }));
   // tRPC API
   app.use(
     "/api/trpc",
