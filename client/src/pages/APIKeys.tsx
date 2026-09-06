@@ -8,58 +8,47 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Key, Plus, Copy, Eye, EyeOff, Trash2, Calendar } from "lucide-react";
+import { Copy, Plus, Trash2, Calendar } from "lucide-react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
 
-interface APIKey {
-  id: string;
-  name: string;
-  key: string;
-  scope: string;
-  createdAt: string;
-  lastUsed: string;
-  expiresAt: string;
-  status: "active" | "expired" | "revoked";
-}
+type Scope = "full_access" | "read_only" | "limited";
 
 export default function APIKeys() {
-  const [apiKeys, setApiKeys] = useState<APIKey[]>([
-    {
-      id: "1",
-      name: "Production API Key",
-      key: "sahool_live_51234567890abcdefghijklmnop",
-      scope: "full_access",
-      createdAt: "2024-01-15",
-      lastUsed: "منذ ساعتين",
-      expiresAt: "2025-01-15",
-      status: "active",
-    },
-    {
-      id: "2",
-      name: "Mobile App Key",
-      key: "sahool_live_98765432109876543210987654",
-      scope: "read_only",
-      createdAt: "2024-01-10",
-      lastUsed: "منذ يوم",
-      expiresAt: "2024-12-31",
-      status: "active",
-    },
-    {
-      id: "3",
-      name: "Testing Key",
-      key: "sahool_test_abcdefghijklmnopqrstuvwxyz",
-      scope: "limited",
-      createdAt: "2023-12-01",
-      lastUsed: "منذ شهر",
-      expiresAt: "2024-01-01",
-      status: "expired",
-    },
-  ]);
+  const { data: apiKeys = [], refetch } = trpc.apiKey.list.useQuery();
 
-  const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyScope, setNewKeyScope] = useState("read_only");
+  const [newKeyScope, setNewKeyScope] = useState<Scope>("read_only");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+
+  const createKey = trpc.apiKey.create.useMutation({
+    onSuccess: (res) => {
+      setCreatedKey(res.key);
+      toast.success("تم إنشاء المفتاح بنجاح");
+      setNewKeyName("");
+      setNewKeyScope("read_only");
+      setIsDialogOpen(false);
+      refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const revokeKey = trpc.apiKey.revoke.useMutation({
+    onSuccess: () => {
+      toast.success("تم إلغاء المفتاح");
+      refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteKey = trpc.apiKey.delete.useMutation({
+    onSuccess: () => {
+      toast.success("تم حذف المفتاح");
+      refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const scopeLabels: Record<string, string> = {
     full_access: "وصول كامل",
@@ -85,13 +74,16 @@ export default function APIKeys() {
     revoked: "destructive",
   };
 
-  const handleToggleShowKey = (id: string) => {
-    setShowKey({ ...showKey, [id]: !showKey[id] });
+  const formatDate = (value: Date | string | null | undefined) => {
+    if (!value) return "—";
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toISOString().split("T")[0];
   };
 
-  const handleCopyKey = (key: string) => {
-    navigator.clipboard.writeText(key);
-    toast.success("تم نسخ المفتاح إلى الحافظة");
+  const handleCopyKey = (value: string) => {
+    navigator.clipboard.writeText(value);
+    toast.success("تم النسخ إلى الحافظة");
   };
 
   const handleCreateKey = () => {
@@ -99,43 +91,20 @@ export default function APIKeys() {
       toast.error("يرجى إدخال اسم للمفتاح");
       return;
     }
-
-    const newKey: APIKey = {
-      id: (apiKeys.length + 1).toString(),
-      name: newKeyName,
-      key: `sahool_live_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`,
-      scope: newKeyScope,
-      createdAt: new Date().toISOString().split("T")[0],
-      lastUsed: "لم يستخدم بعد",
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0],
-      status: "active",
-    };
-
-    setApiKeys([...apiKeys, newKey]);
-    toast.success("تم إنشاء المفتاح بنجاح");
-    setNewKeyName("");
-    setNewKeyScope("read_only");
-    setIsDialogOpen(false);
+    createKey.mutate({ name: newKeyName, scope: newKeyScope });
   };
 
-  const handleRevokeKey = (id: string) => {
-    setApiKeys(
-      apiKeys.map((key) =>
-        key.id === id ? { ...key, status: "revoked" as const } : key
-      )
-    );
-    toast.success("تم إلغاء المفتاح");
+  const handleRevokeKey = (id: number) => {
+    revokeKey.mutate({ id });
   };
 
-  const handleDeleteKey = (id: string) => {
-    setApiKeys(apiKeys.filter((key) => key.id !== id));
-    toast.success("تم حذف المفتاح");
+  const handleDeleteKey = (id: number) => {
+    deleteKey.mutate({ id });
   };
 
   const activeKeysCount = apiKeys.filter((k) => k.status === "active").length;
   const expiredKeysCount = apiKeys.filter((k) => k.status === "expired").length;
+  const revokedKeysCount = apiKeys.filter((k) => k.status === "revoked").length;
 
   return (
     <DashboardLayout>
@@ -173,7 +142,7 @@ export default function APIKeys() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="keyScope">نطاق الصلاحيات</Label>
-                  <Select value={newKeyScope} onValueChange={setNewKeyScope}>
+                  <Select value={newKeyScope} onValueChange={(v) => setNewKeyScope(v as Scope)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -190,6 +159,7 @@ export default function APIKeys() {
               </div>
               <Button
                 onClick={handleCreateKey}
+                disabled={createKey.isPending}
                 className="w-full bg-green-700 hover:bg-green-800"
               >
                 إنشاء المفتاح
@@ -197,6 +167,41 @@ export default function APIKeys() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* One-time created key dialog */}
+        <Dialog open={createdKey !== null} onOpenChange={(open) => { if (!open) setCreatedKey(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>تم إنشاء المفتاح بنجاح</DialogTitle>
+              <DialogDescription>
+                انسخ هذا المفتاح الآن واحفظه في مكان آمن. لن يتم عرضه مرة أخرى.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                تحذير: هذا هو المفتاح الكامل. لأسباب أمنية لن تتمكن من رؤيته مرة أخرى بعد إغلاق هذه النافذة.
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 break-all text-xs bg-gray-100 px-2 py-2 rounded">
+                  {createdKey}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => createdKey && handleCopyKey(createdKey)}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <Button
+                onClick={() => setCreatedKey(null)}
+                className="w-full bg-green-700 hover:bg-green-800"
+              >
+                لقد حفظت المفتاح
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Stats */}
         <div className="grid gap-4 md:grid-cols-4">
@@ -241,7 +246,7 @@ export default function APIKeys() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-900">
-                {apiKeys.filter((k) => k.status === "revoked").length}
+                {revokedKeysCount}
               </div>
             </CardContent>
           </Card>
@@ -274,25 +279,13 @@ export default function APIKeys() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                          {showKey[apiKey.id]
-                            ? apiKey.key
-                            : `${apiKey.key.substring(0, 12)}...`}
+                          {apiKey.keyPrefix}••••••••
                         </code>
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleToggleShowKey(apiKey.id)}
-                        >
-                          {showKey[apiKey.id] ? (
-                            <EyeOff className="w-4 h-4" />
-                          ) : (
-                            <Eye className="w-4 h-4" />
-                          )}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleCopyKey(apiKey.key)}
+                          title="نسخ بادئة المفتاح"
+                          onClick={() => handleCopyKey(apiKey.keyPrefix)}
                         >
                           <Copy className="w-4 h-4" />
                         </Button>
@@ -304,15 +297,15 @@ export default function APIKeys() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {apiKey.createdAt}
+                      {formatDate(apiKey.createdAt)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {apiKey.lastUsed}
+                      {apiKey.lastUsed ? formatDate(apiKey.lastUsed) : "لم يُستخدم بعد"}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       <div className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
-                        {apiKey.expiresAt}
+                        {formatDate(apiKey.expiresAt)}
                       </div>
                     </TableCell>
                     <TableCell>

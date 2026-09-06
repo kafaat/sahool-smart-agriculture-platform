@@ -12,6 +12,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { HelpCircle, MessageCircle, Video, FileText, Send, CheckCircle, Clock, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AIChatBox, Message } from "@/components/AIChatBox";
+import { trpc } from "@/lib/trpc";
 
 export default function Support() {
   const [ticketSubject, setTicketSubject] = useState("");
@@ -22,65 +23,50 @@ export default function Support() {
   ]);
   const [isChatLoading, setIsChatLoading] = useState(false);
 
-  // Mock data
-  const myTickets = [
-    {
-      id: 1,
-      subject: "مشكلة في عرض بيانات المستشعرات",
-      status: "open",
-      priority: "high",
-      createdAt: "2024-01-15",
-      lastUpdate: "منذ ساعتين",
-    },
-    {
-      id: 2,
-      subject: "استفسار عن الاشتراك Pro",
-      status: "in_progress",
-      priority: "medium",
-      createdAt: "2024-01-14",
-      lastUpdate: "منذ يوم",
-    },
-    {
-      id: 3,
-      subject: "طلب تدريب على النظام",
-      status: "resolved",
-      priority: "low",
-      createdAt: "2024-01-10",
-      lastUpdate: "منذ 5 أيام",
-    },
-  ];
+  const { data: myTickets = [], refetch: refetchTickets } = trpc.support.listTickets.useQuery();
+  const { data: faqItems = [] } = trpc.support.listFaq.useQuery();
 
-  const faqItems = [
-    {
-      question: "كيف أضيف مزرعة جديدة؟",
-      answer: "انتقل إلى لوحة التحكم، ثم اضغط على زر 'إضافة مزرعة جديدة'. املأ البيانات المطلوبة وحدد موقع المزرعة على الخريطة.",
+  const createTicketMutation = trpc.support.createTicket.useMutation({
+    onSuccess: () => {
+      toast.success("تم إنشاء التذكرة بنجاح! سنرد عليك قريباً");
+      setTicketSubject("");
+      setTicketDescription("");
+      setTicketPriority("medium");
+      refetchTickets();
     },
-    {
-      question: "كيف أربط جهاز IoT بالمنصة؟",
-      answer: "اذهب إلى صفحة 'أجهزة IoT'، اضغط 'إضافة جهاز'، أدخل معرف الجهاز ونوعه. تأكد من أن الجهاز متصل بالإنترنت.",
+    onError: (error) => toast.error(error.message),
+  });
+
+  const updateStatusMutation = trpc.support.updateTicketStatus.useMutation({
+    onSuccess: () => {
+      toast.success("تم تحديث حالة التذكرة");
+      refetchTickets();
     },
-    {
-      question: "ما هي خطط الاشتراك المتاحة؟",
-      answer: "نوفر 3 خطط: Free (مجاني للمزارع الصغيرة)، Pro (للمزارع المتوسطة)، Enterprise (للشركات الكبيرة). كل خطة تتضمن ميزات مختلفة.",
-    },
-    {
-      question: "كيف أحصل على التوصيات الذكية؟",
-      answer: "انتقل إلى صفحة 'التوصيات الذكية'، اختر مزرعتك وحقلك، ثم اطرح سؤالك. سيقوم الذكاء الاصطناعي بتحليل بياناتك وتقديم توصيات مخصصة.",
-    },
-    {
-      question: "هل يمكنني تصدير التقارير؟",
-      answer: "نعم، يمكنك تصدير التقارير بصيغ PDF وExcel من صفحة 'التقارير والتحليلات'. اختر نوع التقرير والفترة الزمنية ثم اضغط 'تصدير'.",
-    },
-  ];
+    onError: (error) => toast.error(error.message),
+  });
 
   const handleCreateTicket = () => {
     if (!ticketSubject || !ticketDescription) {
       toast.error("الرجاء ملء جميع الحقول");
       return;
     }
-    toast.success("تم إنشاء التذكرة بنجاح! سنرد عليك قريباً");
-    setTicketSubject("");
-    setTicketDescription("");
+    createTicketMutation.mutate({
+      subject: ticketSubject,
+      description: ticketDescription,
+      priority: ticketPriority,
+    });
+  };
+
+  const formatDate = (value: Date | string | number) => {
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("ar", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
   const statusLabels = {
@@ -202,6 +188,7 @@ export default function Support() {
 
                   <Button
                     onClick={handleCreateTicket}
+                    disabled={createTicketMutation.isPending}
                     className="w-full bg-green-700 hover:bg-green-800"
                   >
                     <Send className="w-4 h-4 mr-2" />
@@ -220,33 +207,55 @@ export default function Support() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {myTickets.map((ticket) => (
-                      <div
-                        key={ticket.id}
-                        className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <h4 className="font-semibold text-sm">{ticket.subject}</h4>
-                          <Badge variant={statusColors[ticket.status as keyof typeof statusColors] as any}>
-                            {statusLabels[ticket.status as keyof typeof statusLabels]}
-                          </Badge>
+                    {myTickets.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-6">
+                        لا توجد تذاكر بعد
+                      </p>
+                    ) : (
+                      myTickets.map((ticket) => (
+                        <div
+                          key={ticket.id}
+                          className="p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <h4 className="font-semibold text-sm">{ticket.subject}</h4>
+                            <Badge variant={statusColors[ticket.status as keyof typeof statusColors] as any}>
+                              {statusLabels[ticket.status as keyof typeof statusLabels]}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                            <span className="flex items-center gap-1">
+                              {ticket.status === "resolved" ? (
+                                <CheckCircle className="w-3 h-3" />
+                              ) : ticket.status === "in_progress" ? (
+                                <Clock className="w-3 h-3" />
+                              ) : (
+                                <AlertCircle className="w-3 h-3" />
+                              )}
+                              {priorityLabels[ticket.priority as keyof typeof priorityLabels]}
+                            </span>
+                            <span>#{ticket.id}</span>
+                            <span>{formatDate(ticket.updatedAt ?? ticket.createdAt)}</span>
+                          </div>
+                          <Select
+                            value={ticket.status}
+                            onValueChange={(value: any) =>
+                              updateStatusMutation.mutate({ id: ticket.id, status: value })
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="open">{statusLabels.open}</SelectItem>
+                              <SelectItem value="in_progress">{statusLabels.in_progress}</SelectItem>
+                              <SelectItem value="resolved">{statusLabels.resolved}</SelectItem>
+                              <SelectItem value="closed">{statusLabels.closed}</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            {ticket.status === "resolved" ? (
-                              <CheckCircle className="w-3 h-3" />
-                            ) : ticket.status === "in_progress" ? (
-                              <Clock className="w-3 h-3" />
-                            ) : (
-                              <AlertCircle className="w-3 h-3" />
-                            )}
-                            {priorityLabels[ticket.priority as keyof typeof priorityLabels]}
-                          </span>
-                          <span>#{ticket.id}</span>
-                          <span>{ticket.lastUpdate}</span>
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -265,18 +274,24 @@ export default function Support() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Accordion type="single" collapsible className="w-full">
-                  {faqItems.map((item, index) => (
-                    <AccordionItem key={index} value={`item-${index}`}>
-                      <AccordionTrigger className="text-right">
-                        {item.question}
-                      </AccordionTrigger>
-                      <AccordionContent className="text-muted-foreground">
-                        {item.answer}
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
+                {faqItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    لا توجد أسئلة شائعة حالياً
+                  </p>
+                ) : (
+                  <Accordion type="single" collapsible className="w-full">
+                    {faqItems.map((item) => (
+                      <AccordionItem key={item.id} value={`item-${item.id}`}>
+                        <AccordionTrigger className="text-right">
+                          {item.question}
+                        </AccordionTrigger>
+                        <AccordionContent className="text-muted-foreground">
+                          {item.answer}
+                        </AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

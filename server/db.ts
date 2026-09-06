@@ -106,9 +106,29 @@ export async function getUserByOpenId(openId: string) {
 export async function getUserById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-  
+
   const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+// ============ ADMIN USER OPERATIONS ============
+
+export async function listUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(users).orderBy(desc(users.createdAt));
+}
+
+export async function updateUserRole(id: number, role: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.update(users).set({ role: role as any }).where(eq(users.id, id));
+}
+
+export async function updateUserStatus(id: number, status: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.update(users).set({ status: status as any }).where(eq(users.id, id));
 }
 
 // ============ FARM OPERATIONS ============
@@ -211,10 +231,18 @@ export async function getDevicesByFarmId(farmId: number) {
   return await db.select().from(iotDevices).where(eq(iotDevices.farmId, farmId));
 }
 
+export async function getDeviceById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(iotDevices).where(eq(iotDevices.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
 export async function updateDeviceStatus(id: number, status: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
+
   return await db.update(iotDevices).set({ status: status as any }).where(eq(iotDevices.id, id));
 }
 
@@ -333,10 +361,18 @@ export async function getAlertsByUser(userId: number, unreadOnly: boolean = fals
     .orderBy(desc(alerts.createdAt));
 }
 
+export async function getAlertById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(alerts).where(eq(alerts.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
 export async function markAlertAsRead(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
+
   return await db.update(alerts).set({ isRead: true }).where(eq(alerts.id, id));
 }
 
@@ -358,10 +394,18 @@ export async function getRecommendationsByUser(userId: number) {
     .orderBy(desc(recommendations.createdAt));
 }
 
+export async function getRecommendationById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(recommendations).where(eq(recommendations.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
 export async function updateRecommendationStatus(id: number, status: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
+
   return await db.update(recommendations).set({ status: status as any }).where(eq(recommendations.id, id));
 }
 

@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal, index } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -11,6 +11,7 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin", "farmer_small", "farmer_medium", "enterprise", "government"]).default("user").notNull(),
+  status: mysqlEnum("status", ["active", "suspended", "pending"]).default("active").notNull(),
   phone: varchar("phone", { length: 20 }),
   country: varchar("country", { length: 100 }),
   region: varchar("region", { length: 100 }),
@@ -243,6 +244,219 @@ export const reports = mysqlTable("reports", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// ============================================================================
+// ERP MODULE — inventory, procurement, work orders (scoped per owner)
+// ============================================================================
+
+export const inventoryItems = mysqlTable("inventoryItems", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }),
+  quantity: int("quantity").notNull().default(0),
+  unit: varchar("unit", { length: 50 }),
+  minStock: int("minStock").notNull().default(0),
+  price: int("price").notNull().default(0), // amount in smallest currency unit
+  location: varchar("location", { length: 100 }),
+  status: mysqlEnum("status", ["in_stock", "low_stock", "critical"]).default("in_stock").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ ownerIdx: index("inventory_owner_idx").on(t.ownerId) }));
+
+export const purchaseOrders = mysqlTable("purchaseOrders", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  code: varchar("code", { length: 50 }).notNull(), // e.g. PO-001
+  supplier: varchar("supplier", { length: 255 }),
+  items: text("items"), // free-text / JSON list of line items
+  totalAmount: int("totalAmount").notNull().default(0),
+  status: mysqlEnum("status", ["pending", "approved", "delivered", "cancelled"]).default("pending").notNull(),
+  orderDate: timestamp("orderDate"),
+  expectedDelivery: timestamp("expectedDelivery"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ ownerIdx: index("po_owner_idx").on(t.ownerId) }));
+
+export const workOrders = mysqlTable("workOrders", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  code: varchar("code", { length: 50 }).notNull(), // e.g. WO-001
+  field: varchar("field", { length: 255 }),
+  task: text("task"),
+  assignedTo: varchar("assignedTo", { length: 255 }),
+  status: mysqlEnum("status", ["scheduled", "in_progress", "completed", "cancelled"]).default("scheduled").notNull(),
+  priority: mysqlEnum("priority", ["low", "medium", "high"]).default("medium").notNull(),
+  startDate: timestamp("startDate"),
+  dueDate: timestamp("dueDate"),
+  progress: int("progress").notNull().default(0), // 0-100
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ ownerIdx: index("wo_owner_idx").on(t.ownerId) }));
+
+// ============================================================================
+// CRM MODULE — customers, activities, pipeline deals (scoped per owner)
+// ============================================================================
+
+export const customers = mysqlTable("customers", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 40 }),
+  location: varchar("location", { length: 100 }),
+  farmsCount: int("farmsCount").notNull().default(0),
+  totalArea: int("totalArea").notNull().default(0),
+  status: mysqlEnum("status", ["active", "vip", "inactive"]).default("active").notNull(),
+  lastContact: timestamp("lastContact"),
+  lifetimeValue: int("lifetimeValue").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ ownerIdx: index("customer_owner_idx").on(t.ownerId) }));
+
+export const crmActivities = mysqlTable("crmActivities", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  customerId: int("customerId"),
+  customerName: varchar("customerName", { length: 255 }),
+  type: mysqlEnum("type", ["call", "meeting", "email", "task"]).notNull(),
+  description: text("description"),
+  date: timestamp("date"),
+  status: mysqlEnum("status", ["scheduled", "completed", "cancelled"]).default("scheduled").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ ownerIdx: index("activity_owner_idx").on(t.ownerId) }));
+
+export const pipelineDeals = mysqlTable("pipelineDeals", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  customerId: int("customerId"),
+  customerName: varchar("customerName", { length: 255 }),
+  title: varchar("title", { length: 255 }).notNull(),
+  value: int("value").notNull().default(0),
+  stage: mysqlEnum("stage", ["lead", "qualified", "proposal", "negotiation", "won", "lost"]).default("lead").notNull(),
+  probability: int("probability").notNull().default(0), // 0-100
+  expectedClose: timestamp("expectedClose"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ ownerIdx: index("deal_owner_idx").on(t.ownerId) }));
+
+// ============================================================================
+// COMMUNITY MODULE — groups, posts, knowledge base, marketplace (shared read)
+// ============================================================================
+
+export const communityGroups = mysqlTable("communityGroups", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(), // creator
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }),
+  members: int("members").notNull().default(1),
+  postsCount: int("postsCount").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ ownerIdx: index("group_owner_idx").on(t.ownerId) }));
+
+export const communityPosts = mysqlTable("communityPosts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(), // author
+  authorName: varchar("authorName", { length: 255 }),
+  content: text("content").notNull(),
+  likes: int("likes").notNull().default(0),
+  comments: int("comments").notNull().default(0),
+  groupName: varchar("groupName", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ userIdx: index("post_user_idx").on(t.userId) }));
+
+export const knowledgeArticles = mysqlTable("knowledgeArticles", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(), // author
+  title: varchar("title", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }),
+  content: text("content"),
+  views: int("views").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ userIdx: index("article_user_idx").on(t.userId) }));
+
+export const marketplaceListings = mysqlTable("marketplaceListings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(), // seller
+  title: varchar("title", { length: 255 }).notNull(),
+  price: int("price").notNull().default(0),
+  sellerName: varchar("sellerName", { length: 255 }),
+  location: varchar("location", { length: 100 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ userIdx: index("listing_user_idx").on(t.userId) }));
+
+// ============================================================================
+// SUPPORT MODULE — tickets (per user) and FAQ (global)
+// ============================================================================
+
+export const supportTickets = mysqlTable("supportTickets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  description: text("description"),
+  status: mysqlEnum("status", ["open", "in_progress", "resolved", "closed"]).default("open").notNull(),
+  priority: mysqlEnum("priority", ["low", "medium", "high"]).default("medium").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ userIdx: index("ticket_user_idx").on(t.userId) }));
+
+export const faqItems = mysqlTable("faqItems", {
+  id: int("id").autoincrement().primaryKey(),
+  question: varchar("question", { length: 500 }).notNull(),
+  answer: text("answer").notNull(),
+  sortOrder: int("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+// ============================================================================
+// NOTIFICATIONS MODULE — per-user in-app notifications
+// ============================================================================
+
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  type: mysqlEnum("type", ["irrigation", "weather", "disease", "equipment", "report", "system"]).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  isRead: boolean("isRead").notNull().default(false),
+  priority: mysqlEnum("priority", ["low", "medium", "high"]).default("medium").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ userIdx: index("notif_user_idx").on(t.userId) }));
+
+// ============================================================================
+// API KEYS MODULE — per-user keys (stored as hash + display prefix)
+// ============================================================================
+
+export const apiKeys = mysqlTable("apiKeys", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  keyPrefix: varchar("keyPrefix", { length: 32 }).notNull(), // shown in UI
+  keyHash: varchar("keyHash", { length: 128 }).notNull(), // sha-256 of full key
+  scope: mysqlEnum("scope", ["full_access", "read_only", "limited"]).default("read_only").notNull(),
+  status: mysqlEnum("status", ["active", "expired", "revoked"]).default("active").notNull(),
+  lastUsed: timestamp("lastUsed"),
+  expiresAt: timestamp("expiresAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, t => ({ userIdx: index("apikey_user_idx").on(t.userId) }));
+
+// ============================================================================
+// INTEGRATIONS MODULE — per-user third-party integration config
+// ============================================================================
+
+export const integrations = mysqlTable("integrations", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  slug: varchar("slug", { length: 100 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: mysqlEnum("category", ["gis", "weather", "communication", "data", "automation"]).notNull(),
+  enabled: boolean("enabled").notNull().default(false),
+  status: mysqlEnum("status", ["connected", "disconnected", "error"]).default("disconnected").notNull(),
+  apiKeyRequired: boolean("apiKeyRequired").notNull().default(false),
+  hasApiKey: boolean("hasApiKey").notNull().default(false), // whether a secret is configured
+  features: text("features"), // JSON array of feature labels
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, t => ({ userIdx: index("integration_user_idx").on(t.userId) }));
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Farm = typeof farms.$inferSelect;
@@ -271,3 +485,34 @@ export type MarketPrice = typeof marketPrices.$inferSelect;
 export type InsertMarketPrice = typeof marketPrices.$inferInsert;
 export type Report = typeof reports.$inferSelect;
 export type InsertReport = typeof reports.$inferInsert;
+
+export type InventoryItem = typeof inventoryItems.$inferSelect;
+export type InsertInventoryItem = typeof inventoryItems.$inferInsert;
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type InsertPurchaseOrder = typeof purchaseOrders.$inferInsert;
+export type WorkOrder = typeof workOrders.$inferSelect;
+export type InsertWorkOrder = typeof workOrders.$inferInsert;
+export type Customer = typeof customers.$inferSelect;
+export type InsertCustomer = typeof customers.$inferInsert;
+export type CrmActivity = typeof crmActivities.$inferSelect;
+export type InsertCrmActivity = typeof crmActivities.$inferInsert;
+export type PipelineDeal = typeof pipelineDeals.$inferSelect;
+export type InsertPipelineDeal = typeof pipelineDeals.$inferInsert;
+export type CommunityGroup = typeof communityGroups.$inferSelect;
+export type InsertCommunityGroup = typeof communityGroups.$inferInsert;
+export type CommunityPost = typeof communityPosts.$inferSelect;
+export type InsertCommunityPost = typeof communityPosts.$inferInsert;
+export type KnowledgeArticle = typeof knowledgeArticles.$inferSelect;
+export type InsertKnowledgeArticle = typeof knowledgeArticles.$inferInsert;
+export type MarketplaceListing = typeof marketplaceListings.$inferSelect;
+export type InsertMarketplaceListing = typeof marketplaceListings.$inferInsert;
+export type SupportTicket = typeof supportTickets.$inferSelect;
+export type InsertSupportTicket = typeof supportTickets.$inferInsert;
+export type FaqItem = typeof faqItems.$inferSelect;
+export type InsertFaqItem = typeof faqItems.$inferInsert;
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = typeof notifications.$inferInsert;
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = typeof apiKeys.$inferInsert;
+export type Integration = typeof integrations.$inferSelect;
+export type InsertIntegration = typeof integrations.$inferInsert;

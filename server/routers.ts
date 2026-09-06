@@ -5,6 +5,49 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
 import { TRPCError } from "@trpc/server";
+import type { User } from "../drizzle/schema";
+import {
+  erpRouter, crmRouter, communityRouter, supportRouter,
+  notificationRouter, apiKeyRouter, integrationRouter, adminRouter,
+} from "./moduleRouters";
+
+// ============ AUTHORIZATION HELPERS ============
+// Every resource is scoped to a farm owner. These helpers resolve the owning
+// farm for a resource and enforce that the caller owns it (admins bypass).
+
+function isAdmin(user: User) {
+  return user.role === "admin";
+}
+
+async function assertFarmAccess(farmId: number, user: User) {
+  const farm = await db.getFarmById(farmId);
+  if (!farm) throw new TRPCError({ code: "NOT_FOUND", message: "Farm not found" });
+  if (farm.ownerId !== user.id && !isAdmin(user)) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+  return farm;
+}
+
+async function assertFieldAccess(fieldId: number, user: User) {
+  const field = await db.getFieldById(fieldId);
+  if (!field) throw new TRPCError({ code: "NOT_FOUND", message: "Field not found" });
+  await assertFarmAccess(field.farmId, user);
+  return field;
+}
+
+async function assertDeviceAccess(deviceId: number, user: User) {
+  const device = await db.getDeviceById(deviceId);
+  if (!device) throw new TRPCError({ code: "NOT_FOUND", message: "Device not found" });
+  if (device.farmId != null) {
+    await assertFarmAccess(device.farmId, user);
+  } else if (device.fieldId != null) {
+    await assertFieldAccess(device.fieldId, user);
+  } else {
+    // Orphan device with no farm/field association — deny by default.
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+  return device;
+}
 
 // ============ FARM ROUTER ============
 
@@ -91,12 +134,10 @@ const fieldRouter = router({
   
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
-      const field = await db.getFieldById(input.id);
-      if (!field) throw new TRPCError({ code: "NOT_FOUND" });
-      return field;
+    .query(async ({ input, ctx }) => {
+      return await assertFieldAccess(input.id, ctx.user);
     }),
-  
+
   create: protectedProcedure
     .input(z.object({
       farmId: z.number(),
@@ -110,14 +151,10 @@ const fieldRouter = router({
       irrigationType: z.enum(["drip", "sprinkler", "flood", "pivot", "manual"]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const farm = await db.getFarmById(input.farmId);
-      if (!farm) throw new TRPCError({ code: "NOT_FOUND" });
-      if (farm.ownerId !== ctx.user.id && ctx.user.role !== "admin") {
-        throw new TRPCError({ code: "FORBIDDEN" });
-      }
+      await assertFarmAccess(input.farmId, ctx.user);
       return await db.createField(input);
     }),
-  
+
   update: protectedProcedure
     .input(z.object({
       id: z.number(),
@@ -131,14 +168,16 @@ const fieldRouter = router({
       irrigationType: z.enum(["drip", "sprinkler", "flood", "pivot", "manual"]).optional(),
       status: z.enum(["active", "fallow", "preparing", "harvesting"]).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, ...data } = input;
+      await assertFieldAccess(id, ctx.user);
       return await db.updateField(id, data);
     }),
-  
+
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertFieldAccess(input.id, ctx.user);
       return await db.deleteField(input.id);
     }),
 });
@@ -148,16 +187,18 @@ const fieldRouter = router({
 const iotRouter = router({
   listByField: protectedProcedure
     .input(z.object({ fieldId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.getDevicesByFieldId(input.fieldId);
     }),
-  
+
   listByFarm: protectedProcedure
     .input(z.object({ farmId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertFarmAccess(input.farmId, ctx.user);
       return await db.getDevicesByFarmId(input.farmId);
     }),
-  
+
   create: protectedProcedure
     .input(z.object({
       fieldId: z.number().optional(),
@@ -169,28 +210,38 @@ const iotRouter = router({
       protocol: z.string().optional(),
       location: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // A device must be tied to a farm or field the caller owns.
+      if (input.farmId != null) {
+        await assertFarmAccess(input.farmId, ctx.user);
+      } else if (input.fieldId != null) {
+        await assertFieldAccess(input.fieldId, ctx.user);
+      } else {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "farmId or fieldId is required" });
+      }
       return await db.createIoTDevice(input);
     }),
-  
+
   updateStatus: protectedProcedure
     .input(z.object({
       id: z.number(),
       status: z.enum(["online", "offline", "maintenance", "error"]),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertDeviceAccess(input.id, ctx.user);
       return await db.updateDeviceStatus(input.id, input.status);
     }),
-  
+
   getReadings: protectedProcedure
     .input(z.object({
       deviceId: z.number(),
       limit: z.number().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertDeviceAccess(input.deviceId, ctx.user);
       return await db.getRecentReadingsByDevice(input.deviceId, input.limit);
     }),
-  
+
   addReading: protectedProcedure
     .input(z.object({
       deviceId: z.number(),
@@ -200,7 +251,8 @@ const iotRouter = router({
       unit: z.string().optional(),
       timestamp: z.date(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertDeviceAccess(input.deviceId, ctx.user);
       return await db.createSensorReading(input);
     }),
 });
@@ -210,10 +262,11 @@ const iotRouter = router({
 const irrigationRouter = router({
   listByField: protectedProcedure
     .input(z.object({ fieldId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.getIrrigationEventsByField(input.fieldId);
     }),
-  
+
   create: protectedProcedure
     .input(z.object({
       fieldId: z.number(),
@@ -225,7 +278,8 @@ const irrigationRouter = router({
       deviceId: z.number().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.createIrrigationEvent(input);
     }),
 });
@@ -235,10 +289,11 @@ const irrigationRouter = router({
 const fertilizationRouter = router({
   listByField: protectedProcedure
     .input(z.object({ fieldId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.getFertilizationEventsByField(input.fieldId);
     }),
-  
+
   create: protectedProcedure
     .input(z.object({
       fieldId: z.number(),
@@ -250,7 +305,8 @@ const fertilizationRouter = router({
       cost: z.number().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.createFertilizationEvent(input);
     }),
 });
@@ -259,14 +315,15 @@ const fertilizationRouter = router({
 
 const weatherRouter = router({
   getByFarm: protectedProcedure
-    .input(z.object({ 
+    .input(z.object({
       farmId: z.number(),
       limit: z.number().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertFarmAccess(input.farmId, ctx.user);
       return await db.getRecentWeatherByFarm(input.farmId, input.limit);
     }),
-  
+
   add: protectedProcedure
     .input(z.object({
       farmId: z.number(),
@@ -280,7 +337,8 @@ const weatherRouter = router({
       uvIndex: z.number().optional(),
       source: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertFarmAccess(input.farmId, ctx.user);
       return await db.createWeatherData(input);
     }),
 });
@@ -296,7 +354,12 @@ const alertRouter = router({
   
   markAsRead: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const alert = await db.getAlertById(input.id);
+      if (!alert) throw new TRPCError({ code: "NOT_FOUND" });
+      if (alert.userId !== ctx.user.id && !isAdmin(ctx.user)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
       return await db.markAlertAsRead(input.id);
     }),
   
@@ -331,7 +394,12 @@ const recommendationRouter = router({
       id: z.number(),
       status: z.enum(["pending", "accepted", "rejected", "completed"]),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const rec = await db.getRecommendationById(input.id);
+      if (!rec) throw new TRPCError({ code: "NOT_FOUND" });
+      if (rec.userId !== ctx.user.id && !isAdmin(ctx.user)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
       return await db.updateRecommendationStatus(input.id, input.status);
     }),
   
@@ -373,10 +441,11 @@ const cropRouter = router({
 const harvestRouter = router({
   listByField: protectedProcedure
     .input(z.object({ fieldId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.getHarvestRecordsByField(input.fieldId);
     }),
-  
+
   create: protectedProcedure
     .input(z.object({
       fieldId: z.number(),
@@ -388,7 +457,8 @@ const harvestRouter = router({
       totalRevenue: z.number().optional(),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertFieldAccess(input.fieldId, ctx.user);
       return await db.createHarvestRecord(input);
     }),
 });
@@ -479,6 +549,16 @@ export const appRouter = router({
   market: marketRouter,
   report: reportRouter,
   dashboard: dashboardRouter,
+
+  // Business modules
+  erp: erpRouter,
+  crm: crmRouter,
+  community: communityRouter,
+  support: supportRouter,
+  notification: notificationRouter,
+  apiKey: apiKeyRouter,
+  integration: integrationRouter,
+  admin: adminRouter,
 });
 
 export type AppRouter = typeof appRouter;

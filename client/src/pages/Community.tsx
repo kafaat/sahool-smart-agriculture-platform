@@ -7,73 +7,132 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Users, MessageCircle, BookOpen, ShoppingBag, Plus, Send, ThumbsUp, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
+
+function formatRelativeTime(value: string | number | Date): string {
+  const date = new Date(value);
+  const time = date.getTime();
+  if (Number.isNaN(time)) return "";
+  const diff = Date.now() - time;
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "الآن";
+  if (minutes < 60) return `منذ ${minutes} دقيقة`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `منذ ${hours} ساعة`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `منذ ${days} يوم`;
+  return date.toLocaleDateString("ar");
+}
+
+function getAvatar(name?: string | null): string {
+  const trimmed = (name ?? "").trim();
+  return trimmed.length > 0 ? trimmed.charAt(0) : "؟";
+}
 
 export default function Community() {
   const [newPostContent, setNewPostContent] = useState("");
 
-  // Mock data
-  const groups = [
-    { id: 1, name: "مزارعي القمح - اليمن", members: 245, posts: 89, category: "محصول" },
-    { id: 2, name: "الزراعة العضوية", members: 189, posts: 156, category: "تقنية" },
-    { id: 3, name: "مزارعي صنعاء", members: 312, posts: 234, category: "موقع" },
-    { id: 4, name: "مبتدئين في الزراعة", members: 567, posts: 423, category: "خبرة" },
-  ];
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [groupCategory, setGroupCategory] = useState("");
 
-  const posts = [
-    {
-      id: 1,
-      author: "أحمد محمد",
-      avatar: "أ",
-      time: "منذ ساعتين",
-      content: "هل يمكن استخدام السماد العضوي مع القمح في هذا الوقت من السنة؟",
-      likes: 12,
-      comments: 5,
-      group: "مزارعي القمح - اليمن",
-    },
-    {
-      id: 2,
-      author: "فاطمة علي",
-      avatar: "ف",
-      time: "منذ 4 ساعات",
-      content: "حصاد ممتاز هذا الموسم! شكراً لتوصيات المنصة الذكية 🌾",
-      likes: 28,
-      comments: 9,
-      group: "الزراعة العضوية",
-    },
-    {
-      id: 3,
-      author: "خالد حسن",
-      avatar: "خ",
-      time: "منذ يوم",
-      content: "أبحث عن مضخة ري مستعملة بحالة جيدة. من لديه؟",
-      likes: 7,
-      comments: 3,
-      group: "مزارعي صنعاء",
-    },
-  ];
+  const [listingDialogOpen, setListingDialogOpen] = useState(false);
+  const [listingTitle, setListingTitle] = useState("");
+  const [listingPrice, setListingPrice] = useState("");
+  const [listingLocation, setListingLocation] = useState("");
 
-  const knowledgeBase = [
-    { id: 1, title: "دليل زراعة القمح في اليمن", category: "محاصيل", views: 1234 },
-    { id: 2, title: "كيفية تشخيص أمراض النباتات", category: "صحة النبات", views: 892 },
-    { id: 3, title: "أنظمة الري الحديثة", category: "تقنيات", views: 756 },
-    { id: 4, title: "التسميد العضوي", category: "تربة", views: 645 },
-  ];
+  // Data from tRPC
+  const { data: groupsData, refetch: refetchGroups } = trpc.community.listGroups.useQuery();
+  const { data: postsData, refetch: refetchPosts } = trpc.community.listPosts.useQuery();
+  const { data: articlesData } = trpc.community.listArticles.useQuery();
+  const { data: listingsData, refetch: refetchListings } = trpc.community.listListings.useQuery();
 
-  const marketplace = [
-    { id: 1, title: "مضخة ري 5 حصان", price: 15000, seller: "محمد أحمد", location: "صنعاء" },
-    { id: 2, title: "بذور قمح عضوي - 50 كجم", price: 8000, seller: "فاطمة علي", location: "ذمار" },
-    { id: 3, title: "نظام ري بالتنقيط", price: 25000, seller: "خالد حسن", location: "إب" },
-  ];
+  const groups = groupsData ?? [];
+  const posts = postsData ?? [];
+  const knowledgeBase = articlesData ?? [];
+  const marketplace = listingsData ?? [];
+
+  const createGroup = trpc.community.createGroup.useMutation({
+    onSuccess: () => {
+      toast.success("تم إنشاء المجموعة بنجاح!");
+      setGroupName("");
+      setGroupCategory("");
+      setGroupDialogOpen(false);
+      refetchGroups();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const createPost = trpc.community.createPost.useMutation({
+    onSuccess: () => {
+      toast.success("تم نشر المنشور بنجاح!");
+      setNewPostContent("");
+      refetchPosts();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const likePost = trpc.community.likePost.useMutation({
+    onSuccess: () => refetchPosts(),
+    onError: (e) => toast.error(e.message),
+  });
+
+  const createListing = trpc.community.createListing.useMutation({
+    onSuccess: () => {
+      toast.success("تم إضافة العرض بنجاح!");
+      setListingTitle("");
+      setListingPrice("");
+      setListingLocation("");
+      setListingDialogOpen(false);
+      refetchListings();
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const handleCreatePost = () => {
     if (!newPostContent.trim()) {
       toast.error("الرجاء كتابة محتوى المنشور");
       return;
     }
-    toast.success("تم نشر المنشور بنجاح!");
-    setNewPostContent("");
+    createPost.mutate({ content: newPostContent });
+  };
+
+  const handleCreateGroup = () => {
+    if (!groupName.trim()) {
+      toast.error("الرجاء إدخال اسم المجموعة");
+      return;
+    }
+    createGroup.mutate({
+      name: groupName,
+      category: groupCategory.trim() ? groupCategory : undefined,
+    });
+  };
+
+  const handleCreateListing = () => {
+    if (!listingTitle.trim()) {
+      toast.error("الرجاء إدخال عنوان العرض");
+      return;
+    }
+    const price = Number(listingPrice);
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("الرجاء إدخال سعر صحيح");
+      return;
+    }
+    createListing.mutate({
+      title: listingTitle,
+      price,
+      location: listingLocation.trim() ? listingLocation : undefined,
+    });
   };
 
   return (
@@ -97,10 +156,46 @@ export default function Community() {
           <TabsContent value="groups" className="space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">مجموعاتي</h3>
-              <Button className="bg-green-700 hover:bg-green-800">
-                <Plus className="w-4 h-4 mr-2" />
-                إنشاء مجموعة
-              </Button>
+              <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-green-700 hover:bg-green-800">
+                    <Plus className="w-4 h-4 mr-2" />
+                    إنشاء مجموعة
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>إنشاء مجموعة جديدة</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">اسم المجموعة</label>
+                      <Input
+                        value={groupName}
+                        onChange={(e) => setGroupName(e.target.value)}
+                        placeholder="اسم المجموعة"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">التصنيف</label>
+                      <Input
+                        value={groupCategory}
+                        onChange={(e) => setGroupCategory(e.target.value)}
+                        placeholder="مثال: محصول، تقنية، موقع"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={handleCreateGroup}
+                      disabled={createGroup.isPending}
+                      className="bg-green-700 hover:bg-green-800"
+                    >
+                      إنشاء
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -122,7 +217,7 @@ export default function Community() {
                   <CardContent>
                     <div className="flex gap-6 text-sm text-muted-foreground">
                       <span>{group.members} عضو</span>
-                      <span>{group.posts} منشور</span>
+                      <span>{group.postsCount} منشور</span>
                     </div>
                     <Button variant="outline" className="w-full mt-4">
                       عرض المجموعة
@@ -147,7 +242,11 @@ export default function Community() {
                   rows={3}
                 />
                 <div className="flex justify-end">
-                  <Button onClick={handleCreatePost} className="bg-green-700 hover:bg-green-800">
+                  <Button
+                    onClick={handleCreatePost}
+                    disabled={createPost.isPending}
+                    className="bg-green-700 hover:bg-green-800"
+                  >
                     <Send className="w-4 h-4 mr-2" />
                     نشر
                   </Button>
@@ -163,15 +262,15 @@ export default function Community() {
                     <div className="flex items-start gap-3">
                       <Avatar>
                         <AvatarFallback className="bg-green-100 text-green-700">
-                          {post.avatar}
+                          {getAvatar(post.authorName)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
                         <div className="flex items-center justify-between">
                           <div>
-                            <h4 className="font-semibold">{post.author}</h4>
+                            <h4 className="font-semibold">{post.authorName}</h4>
                             <p className="text-xs text-muted-foreground">
-                              {post.group} • {post.time}
+                              {post.groupName} • {formatRelativeTime(post.createdAt)}
                             </p>
                           </div>
                         </div>
@@ -181,7 +280,12 @@ export default function Community() {
                   <CardContent className="space-y-4">
                     <p className="text-sm">{post.content}</p>
                     <div className="flex gap-4 pt-2 border-t">
-                      <Button variant="ghost" size="sm" className="gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => likePost.mutate({ id: post.id })}
+                      >
                         <ThumbsUp className="w-4 h-4" />
                         {post.likes}
                       </Button>
@@ -234,10 +338,55 @@ export default function Community() {
           <TabsContent value="marketplace" className="space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold">السوق المحلي</h3>
-              <Button className="bg-green-700 hover:bg-green-800">
-                <Plus className="w-4 h-4 mr-2" />
-                إضافة عرض
-              </Button>
+              <Dialog open={listingDialogOpen} onOpenChange={setListingDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-green-700 hover:bg-green-800">
+                    <Plus className="w-4 h-4 mr-2" />
+                    إضافة عرض
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>إضافة عرض جديد</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">العنوان</label>
+                      <Input
+                        value={listingTitle}
+                        onChange={(e) => setListingTitle(e.target.value)}
+                        placeholder="عنوان العرض"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">السعر (ريال)</label>
+                      <Input
+                        type="number"
+                        value={listingPrice}
+                        onChange={(e) => setListingPrice(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">الموقع</label>
+                      <Input
+                        value={listingLocation}
+                        onChange={(e) => setListingLocation(e.target.value)}
+                        placeholder="المدينة"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={handleCreateListing}
+                      disabled={createListing.isPending}
+                      className="bg-green-700 hover:bg-green-800"
+                    >
+                      إضافة
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -249,7 +398,7 @@ export default function Community() {
                       <div className="flex-1">
                         <CardTitle className="text-base">{item.title}</CardTitle>
                         <CardDescription className="text-xs mt-1">
-                          {item.seller} • {item.location}
+                          {item.sellerName} • {item.location}
                         </CardDescription>
                       </div>
                     </div>
